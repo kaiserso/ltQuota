@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.localtimequota.agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/libexec/localtimequota-agent</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Only start in Aqua (GUI login) sessions, not SSH or background sessions -->
+  <key>LimitLoadToSessionType</key>
+  <array>
+    <string>Aqua</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/localtimequota-agent.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/localtimequota-agent.err.log</string>
+</dict>
+</plist>
