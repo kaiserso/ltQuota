@@ -13,8 +13,9 @@ import Shared
 // MARK: - Session identity
 
 let username: String = {
-    let name = NSUserName()
-    guard !name.isEmpty else {
+    // getpwuid(getuid()) is authoritative — reflects the real effective uid regardless
+    // of sudo environment variables, which NSUserName() can misread.
+    guard let pw = getpwuid(getuid()), let name = String(validatingUTF8: pw.pointee.pw_name), !name.isEmpty else {
         AgentLogger.log(event: "fatal_error", fields: ["reason": "cannot determine username"])
         exit(1)
     }
