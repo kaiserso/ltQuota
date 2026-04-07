@@ -45,7 +45,7 @@ func formatDuration(_ seconds: Int) -> String {
 // MARK: - XPC connection
 
 func makeDaemonProxy(timeout: TimeInterval = 5) -> LocalTimeQuotaXPC? {
-    let conn = NSXPCConnection(machServiceName: XPCServiceName.daemon)
+    let conn = NSXPCConnection(machServiceName: XPCServiceName.daemon, options: .privileged)
     conn.remoteObjectInterface = NSXPCInterface(with: LocalTimeQuotaXPC.self)
     conn.resume()
 

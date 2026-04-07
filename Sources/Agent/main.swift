@@ -33,7 +33,7 @@ app.setActivationPolicy(.prohibited)
 // MARK: - XPC connection to daemon
 
 func makeDaemonProxy() -> (NSXPCConnection, LocalTimeQuotaXPC) {
-    let conn = NSXPCConnection(machServiceName: XPCServiceName.daemon)
+    let conn = NSXPCConnection(machServiceName: XPCServiceName.daemon, options: .privileged)
     conn.remoteObjectInterface = NSXPCInterface(with: LocalTimeQuotaXPC.self)
     conn.invalidationHandler = {
         AgentLogger.log(user: username, event: "daemon_connection_invalidated")
