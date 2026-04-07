@@ -59,6 +59,19 @@ func makeDaemonProxy(timeout: TimeInterval = 5) -> LocalTimeQuotaXPC? {
     return proxy
 }
 
+// MARK: - User validation
+
+/// Validates that `name` is a real local POSIX user. Exits with userNotFound if not.
+@discardableResult
+func requireLocalUser(_ name: String) -> LocalUser {
+    guard let user = LocalUser.lookup(shortName: name) else {
+        fputs("quotactl: no local user with short name '\(name)'\n", stderr)
+        fputs("         (use the short/login name, e.g. 'gid', not the full name 'Gidda')\n", stderr)
+        exit(.userNotFound)
+    }
+    return user
+}
+
 // MARK: - Command dispatch
 
 let args = CommandLine.arguments
@@ -90,6 +103,7 @@ case "status":
         fputs("Usage: quotactl status <user>\n", stderr); exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
     let sema = DispatchSemaphore(value: 0)
@@ -147,6 +161,7 @@ case "events":
         fputs("Usage: quotactl events <user>\n", stderr); exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
     let sema = DispatchSemaphore(value: 0)
@@ -177,6 +192,7 @@ case "set":
         fputs("Usage: sudo quotactl set <user> <2h|90m|5400s>\n", stderr); exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
     let sema = DispatchSemaphore(value: 0)
@@ -212,6 +228,7 @@ case "bonus":
         fputs("Usage: sudo quotactl bonus <user> <15m>\n", stderr); exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
     let sema = DispatchSemaphore(value: 0)
@@ -231,6 +248,7 @@ case "reset":
         fputs("Usage: sudo quotactl reset <user>\n", stderr); exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
     let sema = DispatchSemaphore(value: 0)
@@ -250,6 +268,7 @@ case "enable", "disable":
         fputs("Usage: sudo quotactl enable|disable <user>\n", stderr); exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     let enabling = command == "enable"
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
@@ -287,6 +306,7 @@ case "set-idle":
         exit(.invalidArgs)
     }
     let user = args[2]
+    requireLocalUser(user)
     let mode = args[3]
     guard mode == "off" || mode == "on" else {
         fputs("set-idle mode must be 'on' or 'off'\n", stderr); exit(.invalidArgs)

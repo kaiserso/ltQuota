@@ -1,14 +1,13 @@
 // localtimequota-agent
 // Per-user LaunchAgent running in the child's GUI session.
 // Tracks active time, reports to daemon, and shows warning UI.
-//
-// NOTE: We do NOT call NSApplication.shared / app.run() at startup.
-// Using NSApplication from a non-app-bundle executable crashes on modern macOS.
-// Instead we run the plain RunLoop and initialise AppKit lazily only when UI
-// is needed (NSWindow/NSPanel creation implicitly bootstraps the app context).
 import AppKit
 import Foundation
 import Shared
+
+// Disable stdout buffering immediately so every print() reaches the log file
+// even if launchd kills/restarts the process before the buffer would flush.
+setbuf(stdout, nil)
 
 // MARK: - Session identity
 

@@ -4,6 +4,8 @@
 import Foundation
 import Shared
 
+setbuf(stdout, nil)
+
 // MARK: - XPC Listener Delegate
 
 final class DaemonListenerDelegate: NSObject, NSXPCListenerDelegate {
