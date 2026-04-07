@@ -77,7 +77,7 @@ install -o root -g wheel -m 644 \
 # Bootstrap daemon
 # ------------------------------------------------------------
 echo "[install] Bootstrapping daemon..."
-if launchctl list com.localtimequota.daemon &>/dev/null; then
+if sudo launchctl print system/com.localtimequota.daemon &>/dev/null; then
   launchctl bootout system "$DAEMON_PLIST" 2>/dev/null || true
 fi
 launchctl bootstrap system "$DAEMON_PLIST"

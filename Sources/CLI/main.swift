@@ -180,18 +180,13 @@ case "set":
     guard let daemon = makeDaemonProxy() else { exit(.daemonUnavailable) }
 
     let sema = DispatchSemaphore(value: 0)
-    // First get the existing policy, then update it.
+    // Fetch existing policy if present; create a default if none exists yet.
     daemon.getPolicy(username: user) { data, error in
-        if let error {
-            fputs("Error fetching policy: \(error)\n", stderr)
-            sema.signal()
-            Foundation.exit(ExitCode.userNotFound.rawValue)
-        }
         var policy: UserPolicy
         if let data, let p = try? XPCCoder.decode(UserPolicy.self, from: data) {
             policy = p
         } else {
-            // No existing policy — create default.
+            // No policy on file yet — create default for this user.
             policy = UserPolicy(username: user)
         }
         policy.dailyLimitSeconds = seconds
@@ -260,11 +255,6 @@ case "enable", "disable":
 
     let sema = DispatchSemaphore(value: 0)
     daemon.getPolicy(username: user) { data, error in
-        if let error {
-            fputs("Error fetching policy: \(error)\n", stderr)
-            sema.signal()
-            Foundation.exit(ExitCode.userNotFound.rawValue)
-        }
         var policy: UserPolicy
         if let data, let p = try? XPCCoder.decode(UserPolicy.self, from: data) {
             policy = p
@@ -315,11 +305,6 @@ case "set-idle":
 
     let sema = DispatchSemaphore(value: 0)
     daemon.getPolicy(username: user) { data, error in
-        if let error {
-            fputs("Error fetching policy: \(error)\n", stderr)
-            sema.signal()
-            Foundation.exit(ExitCode.userNotFound.rawValue)
-        }
         var policy: UserPolicy
         if let data, let p = try? XPCCoder.decode(UserPolicy.self, from: data) {
             policy = p
