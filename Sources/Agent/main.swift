@@ -1,6 +1,11 @@
 // localtimequota-agent
 // Per-user LaunchAgent running in the child's GUI session.
 // Tracks active time, reports to daemon, and shows warning UI.
+//
+// NOTE: We do NOT call NSApplication.shared / app.run() at startup.
+// Using NSApplication from a non-app-bundle executable crashes on modern macOS.
+// Instead we run the plain RunLoop and initialise AppKit lazily only when UI
+// is needed (NSWindow/NSPanel creation implicitly bootstraps the app context).
 import AppKit
 import Foundation
 import Shared
@@ -25,11 +30,6 @@ AgentLogger.log(user: username, event: "agent_start",
                 fields: ["session_id": sessionId,
                          "pid": "\(ProcessInfo.processInfo.processIdentifier)"])
 
-// MARK: - NSApplication setup (no Dock icon, no menu bar)
-
-let app = NSApplication.shared
-app.setActivationPolicy(.prohibited)
-
 // MARK: - XPC connection to daemon
 
 func makeDaemonProxy() -> (NSXPCConnection, LocalTimeQuotaXPC) {
@@ -51,12 +51,15 @@ func makeDaemonProxy() -> (NSXPCConnection, LocalTimeQuotaXPC) {
 
 let (daemonConnection, daemonProxy) = makeDaemonProxy()
 
-// MARK: - Main-actor startup orchestration
+// MARK: - Startup orchestration (deferred to after run loop starts)
 
-// Kick off the initial status check on the main actor after the run loop starts.
-// We schedule via DispatchQueue.main to avoid Swift 6 top-level actor isolation issues.
 DispatchQueue.main.async {
     Task { @MainActor in
+        // Initialise AppKit application context without calling app.run().
+        // This allows NSWindow/NSPanel creation to work while keeping RunLoop control.
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+
         let ui = WarningUI()
         await initialStatusCheck(ui: ui)
     }
@@ -72,7 +75,6 @@ func initialStatusCheck(ui: WarningUI) async {
                 if let error {
                     AgentLogger.log(user: username, event: "initial_status_error",
                                     fields: ["error": error])
-                    // Start tick loop anyway — daemon may come up shortly.
                     launchTickLoop(ui: ui)
                     return
                 }
@@ -92,7 +94,6 @@ func initialStatusCheck(ui: WarningUI) async {
                                 ])
 
                 if status.exhausted {
-                    // Quota already exhausted — show countdown then enforce.
                     let gracePeriod = status.graceStartedAt != nil
                         ? min(10, status.gracePeriodSeconds)
                         : status.gracePeriodSeconds
@@ -118,5 +119,6 @@ func launchTickLoop(ui: WarningUI) {
 }
 
 // MARK: - Run loop
+// Use the plain RunLoop rather than NSApplication.run() to avoid bundle requirements.
 
-app.run()
+RunLoop.main.run()
