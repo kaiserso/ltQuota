@@ -9,6 +9,17 @@ import Shared
 // even if launchd kills/restarts the process before the buffer would flush.
 setbuf(stdout, nil)
 
+// Debug: write directly to a known path to confirm the binary is actually executing.
+// Remove after confirming logging works.
+do {
+    let debugPath = "/tmp/ltq-agent-alive"
+    let msg = "pid=\(ProcessInfo.processInfo.processIdentifier) uid=\(getuid())\n"
+    msg.withCString { ptr in
+        let fd = open(debugPath, O_WRONLY | O_CREAT | O_APPEND, 0o666)
+        if fd >= 0 { _ = write(fd, ptr, strlen(ptr)); close(fd) }
+    }
+}
+
 // MARK: - Session identity
 
 let username: String = {

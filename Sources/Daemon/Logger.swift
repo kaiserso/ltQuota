@@ -22,7 +22,10 @@ public struct DaemonLogger: Sendable {
         let pairs = obj.sorted { $0.key < $1.key }
             .map { "\"\($0.key)\":\"\($0.value.jsonEscaped)\"" }
             .joined(separator: ",")
-        print("{\(pairs)}")
+        let line = "{\(pairs)}\n"
+        line.withCString { ptr in
+            _ = write(STDOUT_FILENO, ptr, strlen(ptr))
+        }
     }
 }
 

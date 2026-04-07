@@ -53,6 +53,9 @@ for dir in \
   chmod 755 "$dir"
 done
 
+# Log dir must be writable by any user (agent runs as child user).
+chmod 777 "$LOG_DIR"
+
 # Lock down data dirs so child standard users cannot write.
 chmod 700 "$DATA_ROOT/policies" "$DATA_ROOT/usage" "$DATA_ROOT/state"
 

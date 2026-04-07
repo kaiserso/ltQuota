@@ -21,7 +21,12 @@ public struct AgentLogger: Sendable {
         let pairs = obj.sorted { $0.key < $1.key }
             .map { "\"\($0.key)\":\"\($0.value.jsonEscaped)\"" }
             .joined(separator: ",")
-        print("{\(pairs)}")
+        let line = "{\(pairs)}\n"
+        // Write directly to fd 1 — Swift's print() has its own buffer that
+        // may not flush if the process is killed/restarted by launchd.
+        line.withCString { ptr in
+            _ = write(STDOUT_FILENO, ptr, strlen(ptr))
+        }
     }
 }
 

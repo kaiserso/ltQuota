@@ -23,9 +23,9 @@
   </array>
 
   <key>StandardOutPath</key>
-  <string>/tmp/localtimequota-agent.out.log</string>
+  <string>/Library/Logs/LocalTimeQuota/agent.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/tmp/localtimequota-agent.err.log</string>
+  <string>/Library/Logs/LocalTimeQuota/agent.err.log</string>
 </dict>
 </plist>
