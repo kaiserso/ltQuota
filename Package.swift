@@ -24,7 +24,10 @@ let package = Package(
         .executableTarget(
             name: "Agent",
             dependencies: ["Shared"],
-            path: "Sources/Agent"
+            path: "Sources/Agent",
+            linkerSettings: [
+                .linkedFramework("IOKit"),
+            ]
         ),
 
         // Parent admin CLI tool (quotactl)

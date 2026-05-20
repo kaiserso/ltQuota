@@ -87,7 +87,7 @@ launchctl bootstrap system "$DAEMON_PLIST"
 echo "[install] Daemon started."
 
 # ------------------------------------------------------------
-# Optional: create initial policy for a child user
+# Optional: create initial policy and bootstrap agent for a child user
 # ------------------------------------------------------------
 INITIAL_USER="${1:-}"
 if [[ -n "$INITIAL_USER" ]]; then
@@ -113,13 +113,28 @@ JSON
   else
     echo "[install] Policy already exists for $INITIAL_USER, skipping."
   fi
+
+  # Bootstrap the agent into the user's current GUI session if they are logged in.
+  # For future logins the plist in /Library/LaunchAgents/ loads automatically.
+  TARGET_UID=$(id -u "$INITIAL_USER" 2>/dev/null || true)
+  if [[ -n "$TARGET_UID" && "$TARGET_UID" != "0" ]]; then
+    if launchctl print "gui/$TARGET_UID" &>/dev/null 2>&1; then
+      echo "[install] $INITIAL_USER (uid $TARGET_UID) is logged in — bootstrapping agent now..."
+      launchctl bootout "gui/$TARGET_UID/com.localtimequota.agent" 2>/dev/null || true
+      launchctl bootstrap "gui/$TARGET_UID" "$AGENT_PLIST"
+      echo "[install] Agent bootstrapped. Verify: launchctl print gui/$TARGET_UID/com.localtimequota.agent"
+    else
+      echo "[install] $INITIAL_USER is not currently logged in; agent will start at next GUI login."
+    fi
+  fi
 fi
 
 echo ""
 echo "LocalTimeQuota installed successfully."
 echo ""
 echo "  Daemon running:  launchctl list com.localtimequota.daemon"
+echo "  Agent log:       tail -f /Library/Logs/LocalTimeQuota/agent.out.log"
 echo "  Set quota:       sudo quotactl set <user> 2h"
 echo "  Check status:    quotactl status <user>"
 echo ""
-echo "The agent will start automatically at next GUI login for any user."
+echo "The agent starts automatically at GUI login for any user."

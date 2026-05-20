@@ -123,6 +123,14 @@ final class TickLoop {
             activeDelta = Int(accountedDelta.rounded())
         }
 
+        AgentLogger.log(user: username, event: "tick_idle",
+                        fields: [
+                            "seq": "\(tickSeq)",
+                            "idle_s": String(format: "%.1f", rawIdleSecs),
+                            "active_delta_s": "\(activeDelta)",
+                            "accounted_delta_s": String(format: "%.1f", accountedDelta),
+                        ])
+
         let req = AddUsageRequest(
             username: username,
             date: today,
