@@ -16,12 +16,12 @@ final class WarningNotificationCenter: NSObject {
     /// Request notification permission (happens once on first run).
     /// This does NOT trigger TCC — it's a standard notification permission.
     private func setupNotifications() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
             Task { @MainActor in
                 if granted {
                     // Logger.log(event: "notification_permission_granted")
-                } else if let error {
-                    // Logger.log(event: "notification_permission_denied", fields: ["error": error.localizedDescription])
+                } else {
+                    // Logger.log(event: "notification_permission_denied")
                 }
             }
         }
@@ -45,10 +45,8 @@ final class WarningNotificationCenter: NSObject {
             content: content,
             trigger: nil  // Deliver immediately
         )
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                // Logger.log(event: "notification_delivery_error", fields: ["error": error.localizedDescription])
-            }
+        UNUserNotificationCenter.current().add(request) { _ in
+            // Notification added (log delivery errors if needed)
         }
     }
 
