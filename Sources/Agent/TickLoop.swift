@@ -1,10 +1,10 @@
 import AppKit
-import AppKit
 import Foundation
 import Shared
 
 /// Drives the 15-second tick loop: measures active time, reports to daemon, and
-/// triggers warning UI when thresholds are reached.
+/// triggers warning notifications when thresholds are reached.
+/// This version uses UserNotifications instead of AppKit windows to avoid TCC issues.
 @MainActor
 final class TickLoop {
 
@@ -12,15 +12,10 @@ final class TickLoop {
     let sessionId: String
     let daemon: LocalTimeQuotaXPC
 
-    // Weak reference back to the UI controller.
-    weak var warningUI: WarningUI?
-
     private var tickSeq = 0
     private var lastTickMonotonic: Double = MonotonicClock.now()
     private var warningBannerShown = false
     private var finalWarningShown = false
-    private var graceTimerActive = false
-
     // Maximum tick delta before treating the interval as a sleep/wake discontinuity.
     private let maxSensibleDeltaSeconds: Double = 60
 
@@ -73,6 +68,7 @@ final class TickLoop {
             name: TickLoop.wakeNotification,
             object: nil
         )
+        WarningNotificationCenter.shared.clearAllNotifications()
     }
 
     // MARK: - Wake handler
@@ -105,19 +101,9 @@ final class TickLoop {
         let today = DateHelper.localDateString()
 
         // Determine active vs idle.
-        // We need the policy's idle threshold; for now we fetch it from the status reply.
-        // A future optimisation can cache the policy locally.
-        let activeDelta: Int
-
-        // We'll resolve idle threshold from the daemon status we fetch next.
-        // For this tick, use a simple heuristic: if the system has been idle for
-        // longer than the tick interval itself, mark it as 0 active seconds.
-        // The actual policy threshold is applied after we get the status back,
-        // but we pre-classify here for the AddUsage call.
         let rawIdleSecs = IdleMonitor.secondsSinceLastInput()
-        // Use 300s as a safe default if we don't yet have the policy.
-        // The daemon only adds what we send; if we send 0 it counts nothing.
         let conservativeIdleThreshold: Double = 300
+        let activeDelta: Int
         if rawIdleSecs >= conservativeIdleThreshold {
             activeDelta = 0
         } else {
@@ -166,21 +152,15 @@ final class TickLoop {
 
     // MARK: - Status handling
 
-    private func handleStatus(_ status: DaemonStatus, idleSeconds: TimeInterval) {
+    private func handleStatus(_ status: DaemonStatus, idleSeconds _: TimeInterval) {
         guard status.enabled else { return }
 
-        // Re-evaluate active delta against the real policy idle threshold.
-        // (The value we sent was already computed conservatively above; this just
-        //  drives UI decisions, not re-accounting.)
-        let policyIdleThreshold = Double(status.warningThresholdSeconds > 0 ? 300 : 300)
-        _ = idleSeconds >= policyIdleThreshold // informational
-
-        // Early warning banner.
+        // Early warning notification.
         if !warningBannerShown
             && status.remainingSeconds <= status.warningThresholdSeconds
             && !status.exhausted {
             warningBannerShown = true
-            warningUI?.showEarlyWarning(remainingSeconds: status.remainingSeconds)
+            WarningNotificationCenter.shared.sendEarlyWarning(remainingSeconds: status.remainingSeconds)
             AgentLogger.log(user: username, event: "early_warning_shown",
                             fields: ["remaining_seconds": "\(status.remainingSeconds)"])
         }
@@ -199,15 +179,17 @@ final class TickLoop {
                         fields: ["grace_period_seconds": "\(status.gracePeriodSeconds)"])
 
         // Tell the daemon grace has started.
-        let alreadyGraceStarted = status.graceStartedAt != nil
-        let gracePeriod = alreadyGraceStarted ? min(10, status.gracePeriodSeconds) : status.gracePeriodSeconds
-
         daemon.beginGrace(username: username, sessionId: sessionId) { _ in }
 
-        // Show the final warning modal.
-        warningUI?.showFinalWarning(gracePeriodSeconds: gracePeriod) { [weak self] in
+        // Show the final warning notification.
+        WarningNotificationCenter.shared.sendFinalWarning(remainingSeconds: status.gracePeriodSeconds)
+
+        // After grace period, request enforcement from daemon.
+        let gracePeriod = status.gracePeriodSeconds > 0 ? status.gracePeriodSeconds : 60
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(gracePeriod)) { [weak self] in
             guard let self else { return }
             AgentLogger.log(user: self.username, event: "grace_expired_requesting_enforce")
+            WarningNotificationCenter.shared.sendImmediateActionWarning()
             self.daemon.forceEnforce(username: self.username) { error in
                 if let error {
                     AgentLogger.log(user: self.username, event: "enforce_error",

@@ -22,10 +22,24 @@
     <string>Aqua</string>
   </array>
 
+  <!-- Run as a UI element (no Dock icon, lower priority) -->
+  <key>LSUIElement</key>
+  <true/>
+
+  <!-- Standard output and error logging -->
   <key>StandardOutPath</key>
   <string>/Library/Logs/LocalTimeQuota/agent.out.log</string>
 
   <key>StandardErrorPath</key>
   <string>/Library/Logs/LocalTimeQuota/agent.err.log</string>
+
+  <!-- Allow the agent to run continuously without being terminated for inactivity -->
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Ensure the agent has access to IOKit for idle time detection -->
+  <!-- No TCC permissions needed for IOHIDSystem access -->
+  <key>EnableTransactions</key>
+  <false/>
 </dict>
 </plist>

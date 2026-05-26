@@ -1,7 +1,7 @@
 // localtimequota-agent
 // Per-user LaunchAgent running in the child's GUI session.
-// Tracks active time, reports to daemon, and shows warning UI.
-import AppKit
+// Tracks active time, reports to daemon, and sends notifications.
+// TCC-FREE VERSION: Uses UserNotifications instead of AppKit to avoid TCC prompts.
 import Foundation
 import Shared
 
@@ -23,8 +23,6 @@ do {
 // MARK: - Session identity
 
 let username: String = {
-    // getpwuid(getuid()) is authoritative — reflects the real effective uid regardless
-    // of sudo environment variables, which NSUserName() can misread.
     guard let pw = getpwuid(getuid()), let name = String(validatingUTF8: pw.pointee.pw_name), !name.isEmpty else {
         AgentLogger.log(event: "fatal_error", fields: ["reason": "cannot determine username"])
         exit(1)
@@ -66,18 +64,16 @@ let (daemonConnection, daemonProxy) = makeDaemonProxy()
 
 DispatchQueue.main.async {
     Task { @MainActor in
-        // Initialise AppKit application context without calling app.run().
-        // This allows NSWindow/NSPanel creation to work while keeping RunLoop control.
-        let app = NSApplication.shared
-        app.setActivationPolicy(.prohibited)
-
-        let ui = WarningUI()
-        await initialStatusCheck(ui: ui)
+        // Initialize notification center for warnings (no TCC required).
+        _ = WarningNotificationCenter.shared
+        
+        // Perform initial status check and start tick loop.
+        await initialStatusCheck()
     }
 }
 
 @MainActor
-func initialStatusCheck(ui: WarningUI) async {
+func initialStatusCheck() async {
     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
         daemonProxy.getStatus(username: username) { data, error in
             Task { @MainActor in
@@ -86,50 +82,49 @@ func initialStatusCheck(ui: WarningUI) async {
                 if let error {
                     AgentLogger.log(user: username, event: "initial_status_error",
                                     fields: ["error": error])
-                    launchTickLoop(ui: ui)
+                    launchTickLoop()
                     return
                 }
                 guard let data,
                       let status = try? XPCCoder.decode(DaemonStatus.self, from: data)
                 else {
                     AgentLogger.log(user: username, event: "initial_status_parse_error")
-                    launchTickLoop(ui: ui)
+                    launchTickLoop()
                     return
                 }
 
                 AgentLogger.log(user: username, event: "initial_status",
                                 fields: [
-                                    "counted_seconds": "\(status.countedSeconds)",
+                                    "enabled": "\(status.enabled)",
                                     "remaining_seconds": "\(status.remainingSeconds)",
-                                    "exhausted": "\(status.exhausted)"
                                 ])
 
+                // If already exhausted, show final warning immediately.
                 if status.exhausted {
-                    let gracePeriod = status.graceStartedAt != nil
-                        ? min(10, status.gracePeriodSeconds)
-                        : status.gracePeriodSeconds
-
-                    ui.showExhaustedAtLogin(gracePeriodSeconds: gracePeriod) {
-                        AgentLogger.log(user: username, event: "exhausted_at_login_enforce")
-                        daemonProxy.forceEnforce(username: username) { _ in }
-                    }
-                } else {
-                    launchTickLoop(ui: ui)
+                    AgentLogger.log(user: username, event: "initial_exhausted")
+                    WarningNotificationCenter.shared.sendFinalWarning(
+                        remainingSeconds: max(0, status.gracePeriodSeconds)
+                    )
                 }
+
+                launchTickLoop()
             }
         }
     }
 }
 
 @MainActor
-func launchTickLoop(ui: WarningUI) {
+func launchTickLoop() {
     let loop = TickLoop(username: username, sessionId: sessionId, daemon: daemonProxy)
-    loop.warningUI = ui
     loop.start()
-    AgentLogger.log(user: username, event: "tick_loop_active")
+
+    AgentLogger.log(user: username, event: "tick_loop_launched")
+
+    // When run loop exits (should not happen unless terminated), clean up notifications.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 86400 * 365) {
+        WarningNotificationCenter.shared.clearAllNotifications()
+    }
 }
 
-// MARK: - Run loop
-// Use the plain RunLoop rather than NSApplication.run() to avoid bundle requirements.
-
+// Run the main run loop indefinitely.
 RunLoop.main.run()
