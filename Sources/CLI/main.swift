@@ -42,6 +42,26 @@ func formatDuration(_ seconds: Int) -> String {
     return parts.joined(separator: " ")
 }
 
+@discardableResult
+func runProcess(_ executable: String, _ arguments: [String]) -> (ok: Bool, output: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let out = String(data: data, encoding: .utf8) ?? ""
+        return (process.terminationStatus == 0, out)
+    } catch {
+        return (false, error.localizedDescription)
+    }
+}
+
 // MARK: - XPC connection
 
 func makeDaemonProxy(timeout: TimeInterval = 5) -> LocalTimeQuotaXPC? {
@@ -82,6 +102,7 @@ guard args.count >= 2 else {
       quotactl status <user>
       quotactl list
       quotactl events <user>
+    sudo quotactl test-warning <user>
       sudo quotactl set <user> <2h|90m|5400s>
       sudo quotactl bonus <user> <15m>
       sudo quotactl reset <user>
@@ -185,6 +206,43 @@ case "events":
         }
     }
     sema.wait()
+
+// MARK: test-warning
+case "test-warning":
+    guard args.count == 3 else {
+        fputs("Usage: sudo quotactl test-warning <user>\n", stderr); exit(.invalidArgs)
+    }
+    guard geteuid() == 0 else {
+        fputs("Error: test-warning requires sudo/root\n", stderr)
+        exit(.permissionDenied)
+    }
+
+    let user = requireLocalUser(args[2])
+    let uid = user.uid
+    let guiDomain = "gui/\(uid)"
+
+    // Ensure the target user currently has a GUI session.
+    let domainCheck = runProcess("/bin/launchctl", ["print", guiDomain])
+    guard domainCheck.ok else {
+        fputs("Error: user '\(user.shortName)' does not have an active GUI session\n", stderr)
+        exit(.invalidArgs)
+    }
+
+    let result = runProcess("/bin/launchctl", [
+        "asuser", "\(uid)",
+        "/usr/local/libexec/localtimequota-agent", "--test-warnings"
+    ])
+
+    if result.ok {
+        print("Triggered warning test for \(user.shortName).")
+        print("You should see 3 notifications (early, final, immediate) plus alert beeps.")
+    } else {
+        fputs("Error: failed to trigger warning test\n", stderr)
+        if !result.output.isEmpty {
+            fputs(result.output + "\n", stderr)
+        }
+        exit(.storageError)
+    }
 
 // MARK: set
 case "set":

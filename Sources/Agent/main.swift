@@ -12,6 +12,20 @@ setbuf(stderr, nil)
 
 fputs("[agent] startup: begin\n", stderr)
 
+// One-shot warning test mode for manual validation.
+if CommandLine.arguments.contains("--test-warnings") {
+    Task { @MainActor in
+        WarningNotificationCenter.shared.sendEarlyWarning(remainingSeconds: 30 * 60)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        WarningNotificationCenter.shared.sendFinalWarning(remainingSeconds: 2 * 60)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        WarningNotificationCenter.shared.sendImmediateActionWarning()
+        fputs("[agent] test-warnings: complete\n", stderr)
+        Foundation.exit(0)
+    }
+    dispatchMain()
+}
+
 // Debug: write directly to a known path to confirm the binary is actually executing.
 // Remove after confirming logging works.
 do {
