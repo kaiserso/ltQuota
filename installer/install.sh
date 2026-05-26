@@ -87,7 +87,7 @@ launchctl bootstrap system "$DAEMON_PLIST"
 echo "[install] Daemon started."
 
 # ------------------------------------------------------------
-# Optional: create initial policy and bootstrap agent for a child user
+# Optional: create initial policy for a provided user
 # ------------------------------------------------------------
 INITIAL_USER="${1:-}"
 if [[ -n "$INITIAL_USER" ]]; then
@@ -114,25 +114,38 @@ JSON
     echo "[install] Policy already exists for $INITIAL_USER, skipping."
   fi
 
-  # Bootstrap the agent into the user's current GUI session if they are logged in.
-  # For future logins the plist in /Library/LaunchAgents/ loads automatically.
-  TARGET_UID=$(id -u "$INITIAL_USER" 2>/dev/null || true)
+  # If a username was provided, prefer that account for immediate bootstrap.
+  BOOTSTRAP_USER="$INITIAL_USER"
+else
+  # No username provided: bootstrap the currently logged-in console user.
+  BOOTSTRAP_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
+fi
+
+# ------------------------------------------------------------
+# Bootstrap agent for one currently logged-in GUI user
+# ------------------------------------------------------------
+if [[ -n "${BOOTSTRAP_USER:-}" && "$BOOTSTRAP_USER" != "root" && "$BOOTSTRAP_USER" != "loginwindow" ]]; then
+  TARGET_UID=$(id -u "$BOOTSTRAP_USER" 2>/dev/null || true)
   if [[ -n "$TARGET_UID" && "$TARGET_UID" != "0" ]]; then
     if launchctl print "gui/$TARGET_UID" &>/dev/null 2>&1; then
-      echo "[install] $INITIAL_USER (uid $TARGET_UID) is logged in — bootstrapping agent now..."
+      echo "[install] $BOOTSTRAP_USER (uid $TARGET_UID) is logged in — bootstrapping agent now..."
       launchctl bootout "gui/$TARGET_UID/com.localtimequota.agent" 2>/dev/null || true
       launchctl bootstrap "gui/$TARGET_UID" "$AGENT_PLIST"
-      echo "[install] Agent bootstrapped. Verify: launchctl print gui/$TARGET_UID/com.localtimequota.agent"
+      launchctl kickstart -kp "gui/$TARGET_UID/com.localtimequota.agent" || true
+      echo "[install] Agent bootstrapped. Verify: sudo launchctl print gui/$TARGET_UID/com.localtimequota.agent"
     else
-      echo "[install] $INITIAL_USER is not currently logged in; agent will start at next GUI login."
+      echo "[install] $BOOTSTRAP_USER is not currently logged in; agent will start at next GUI login."
     fi
   fi
+else
+  echo "[install] No eligible console user detected for immediate agent bootstrap."
+  echo "[install] Agent will start automatically at next GUI login."
 fi
 
 echo ""
 echo "LocalTimeQuota installed successfully."
 echo ""
-echo "  Daemon running:  launchctl list com.localtimequota.daemon"
+echo "  Daemon running:  sudo launchctl list com.localtimequota.daemon"
 echo "  Agent log:       tail -f /Library/Logs/LocalTimeQuota/agent.out.log"
 echo "  Set quota:       sudo quotactl set <user> 2h"
 echo "  Check status:    quotactl status <user>"

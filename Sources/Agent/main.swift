@@ -8,6 +8,9 @@ import Shared
 // Disable stdout buffering immediately so every print() reaches the log file
 // even if launchd kills/restarts the process before the buffer would flush.
 setbuf(stdout, nil)
+setbuf(stderr, nil)
+
+fputs("[agent] startup: begin\n", stderr)
 
 // Debug: write directly to a known path to confirm the binary is actually executing.
 // Remove after confirming logging works.
@@ -29,6 +32,8 @@ let username: String = {
     }
     return name
 }()
+
+fputs("[agent] startup: username_resolved\n", stderr)
 
 let sessionId: String = {
     let prefix = UUID().uuidString.prefix(8).lowercased()
@@ -59,14 +64,15 @@ func makeDaemonProxy() -> (NSXPCConnection, LocalTimeQuotaXPC) {
 }
 
 let (daemonConnection, daemonProxy) = makeDaemonProxy()
+var activeTickLoop: TickLoop?
+
+fputs("[agent] startup: daemon_proxy_ready\n", stderr)
 
 // MARK: - Startup orchestration (deferred to after run loop starts)
 
 DispatchQueue.main.async {
     Task { @MainActor in
-        // Initialize notification center for warnings (no TCC required).
-        _ = WarningNotificationCenter.shared
-        
+        fputs("[agent] startup: initial_status_check\n", stderr)
         // Perform initial status check and start tick loop.
         await initialStatusCheck()
     }
@@ -115,7 +121,12 @@ func initialStatusCheck() async {
 
 @MainActor
 func launchTickLoop() {
+    // Keep a strong reference for the lifetime of the process so the
+    // DispatchSourceTimer remains active and ticks keep flowing.
+    activeTickLoop?.stop()
+
     let loop = TickLoop(username: username, sessionId: sessionId, daemon: daemonProxy)
+    activeTickLoop = loop
     loop.start()
 
     AgentLogger.log(user: username, event: "tick_loop_launched")
@@ -126,5 +137,8 @@ func launchTickLoop() {
     }
 }
 
-// Run the main run loop indefinitely.
-RunLoop.main.run()
+// Keep the process alive indefinitely.
+// `RunLoop.main.run()` can return if no input sources are active yet,
+// which causes launchd to restart the agent in a loop.
+fputs("[agent] startup: dispatchMain\n", stderr)
+dispatchMain()
