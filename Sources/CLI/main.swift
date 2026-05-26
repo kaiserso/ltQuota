@@ -43,7 +43,7 @@ func formatDuration(_ seconds: Int) -> String {
 }
 
 @discardableResult
-func runProcess(_ executable: String, _ arguments: [String]) -> (ok: Bool, output: String) {
+func runProcess(_ executable: String, _ arguments: [String], timeout: TimeInterval = 5) -> (ok: Bool, output: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments
@@ -53,7 +53,17 @@ func runProcess(_ executable: String, _ arguments: [String]) -> (ok: Bool, outpu
 
     do {
         try process.run()
-        process.waitUntilExit()
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let out = String(data: data, encoding: .utf8) ?? ""
+            return (false, out.isEmpty ? "timed out" : out)
+        }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let out = String(data: data, encoding: .utf8) ?? ""
         return (process.terminationStatus == 0, out)
@@ -127,10 +137,10 @@ guard args.count >= 2 else {
     fputs("""
     quotactl — LocalTimeQuota parent control tool
     Usage:
-      quotactl status <user>
+            quotactl status <user>
       quotactl list
       quotactl events <user>
-    sudo quotactl test-warning <user>
+            quotactl test-warning [user]
       sudo quotactl set <user> <2h|90m|5400s>
       sudo quotactl bonus <user> <15m>
       sudo quotactl reset <user>
@@ -237,17 +247,25 @@ case "events":
 
 // MARK: test-warning
 case "test-warning":
-    guard args.count == 3 else {
-        fputs("Usage: sudo quotactl test-warning <user>\n", stderr); exit(.invalidArgs)
-    }
-    guard geteuid() == 0 else {
-        fputs("Error: test-warning requires sudo/root\n", stderr)
-        exit(.permissionDenied)
+    guard args.count == 2 || args.count == 3 else {
+        fputs("Usage: quotactl test-warning [user]\n", stderr); exit(.invalidArgs)
     }
 
-    let user = requireLocalUser(args[2])
+    let user: LocalUser
+    if args.count == 3 {
+        user = requireLocalUser(args[2])
+    } else {
+        guard let current = LocalUser.lookup(uid: getuid()) else {
+            fputs("Error: could not determine current user\n", stderr)
+            exit(.userNotFound)
+        }
+        user = current
+    }
+
     let uid = user.uid
     let guiDomain = "gui/\(uid)"
+    let currentUID = getuid()
+    let useDirectExecution = currentUID == uid
 
     // Ensure the target user currently has a GUI session.
     let domainCheck = runProcess("/bin/launchctl", ["print", guiDomain])
@@ -256,30 +274,45 @@ case "test-warning":
         exit(.invalidArgs)
     }
 
-    let earlyOK = showTestNotification(
-        uid: uid,
-        title: "Computer Time Limit",
-        body: "30 minutes of computer time remaining today.",
-        subtitle: "LocalTimeQuota Test"
+    func runScript(_ script: String) -> (ok: Bool, output: String) {
+        if useDirectExecution {
+            return runProcess("/usr/bin/osascript", ["-e", script])
+        }
+        guard geteuid() == 0 else {
+            return (false, "root required to target another user's GUI session")
+        }
+        return runAsUser(uid, executable: "/usr/bin/osascript", arguments: ["-e", script])
+    }
+
+    func step(_ name: String, script: String) -> Bool {
+        let result = runScript(script)
+        if result.ok {
+            print("[ok] \(name)")
+            return true
+        }
+        let detail = result.output.isEmpty ? "unknown failure" : result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        fputs("[failed] \(name): \(detail)\n", stderr)
+        return false
+    }
+
+    let earlyOK = step(
+        "early notification",
+        script: "display notification \"30 minutes of computer time remaining today.\" with title \"Computer Time Limit\" subtitle \"LocalTimeQuota Test\""
     )
     Thread.sleep(forTimeInterval: 1.0)
 
-    let finalOK = showTestNotification(
-        uid: uid,
-        title: "Time Almost Up",
-        body: "Your session will end in 2 minutes. Save your work now.",
-        subtitle: "LocalTimeQuota Test"
+    let finalOK = step(
+        "final notification",
+        script: "display notification \"Your session will end in 2 minutes. Save your work now.\" with title \"Time Almost Up\" subtitle \"LocalTimeQuota Test\""
     )
-    let finalBeepOK = playTestBeeps(uid: uid, times: 1)
+    let finalBeepOK = step("final beep", script: "beep")
     Thread.sleep(forTimeInterval: 1.0)
 
-    let immediateOK = showTestNotification(
-        uid: uid,
-        title: "Session Ending",
-        body: "Time is up. Your session is being locked now.",
-        subtitle: "LocalTimeQuota Test"
+    let immediateOK = step(
+        "immediate notification",
+        script: "display notification \"Time is up. Your session is being locked now.\" with title \"Session Ending\" subtitle \"LocalTimeQuota Test\""
     )
-    let immediateBeepOK = playTestBeeps(uid: uid, times: 2)
+    let immediateBeepOK = step("immediate beeps", script: "repeat 2 times\nbeep\nend repeat")
 
     if earlyOK && finalOK && finalBeepOK && immediateOK && immediateBeepOK {
         print("Triggered warning test for \(user.shortName).")
