@@ -62,6 +62,34 @@ func runProcess(_ executable: String, _ arguments: [String]) -> (ok: Bool, outpu
     }
 }
 
+@discardableResult
+func runAsUser(_ uid: uid_t, executable: String, arguments: [String]) -> (ok: Bool, output: String) {
+    runProcess("/bin/launchctl", ["asuser", "\(uid)", executable] + arguments)
+}
+
+func escapeAppleScript(_ s: String) -> String {
+    s
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: "\r", with: " ")
+}
+
+@discardableResult
+func showTestNotification(uid: uid_t, title: String, body: String, subtitle: String) -> Bool {
+    let script = "display notification \"\(escapeAppleScript(body))\" with title \"\(escapeAppleScript(title))\" subtitle \"\(escapeAppleScript(subtitle))\""
+    let result = runAsUser(uid, executable: "/usr/bin/osascript", arguments: ["-e", script])
+    return result.ok
+}
+
+@discardableResult
+func playTestBeeps(uid: uid_t, times: Int) -> Bool {
+    guard times > 0 else { return true }
+    let script = "repeat \(times) times\nbeep\nend repeat"
+    let result = runAsUser(uid, executable: "/usr/bin/osascript", arguments: ["-e", script])
+    return result.ok
+}
+
 // MARK: - XPC connection
 
 func makeDaemonProxy(timeout: TimeInterval = 5) -> LocalTimeQuotaXPC? {
@@ -228,19 +256,36 @@ case "test-warning":
         exit(.invalidArgs)
     }
 
-    let result = runProcess("/bin/launchctl", [
-        "asuser", "\(uid)",
-        "/usr/local/libexec/localtimequota-agent", "--test-warnings"
-    ])
+    let earlyOK = showTestNotification(
+        uid: uid,
+        title: "Computer Time Limit",
+        body: "30 minutes of computer time remaining today.",
+        subtitle: "LocalTimeQuota Test"
+    )
+    Thread.sleep(forTimeInterval: 1.0)
 
-    if result.ok {
+    let finalOK = showTestNotification(
+        uid: uid,
+        title: "Time Almost Up",
+        body: "Your session will end in 2 minutes. Save your work now.",
+        subtitle: "LocalTimeQuota Test"
+    )
+    let finalBeepOK = playTestBeeps(uid: uid, times: 1)
+    Thread.sleep(forTimeInterval: 1.0)
+
+    let immediateOK = showTestNotification(
+        uid: uid,
+        title: "Session Ending",
+        body: "Time is up. Your session is being locked now.",
+        subtitle: "LocalTimeQuota Test"
+    )
+    let immediateBeepOK = playTestBeeps(uid: uid, times: 2)
+
+    if earlyOK && finalOK && finalBeepOK && immediateOK && immediateBeepOK {
         print("Triggered warning test for \(user.shortName).")
         print("You should see 3 notifications (early, final, immediate) plus alert beeps.")
     } else {
         fputs("Error: failed to trigger warning test\n", stderr)
-        if !result.output.isEmpty {
-            fputs(result.output + "\n", stderr)
-        }
         exit(.storageError)
     }
 
